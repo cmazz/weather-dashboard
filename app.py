@@ -65,7 +65,15 @@ if st.button("Ask Assistant") and user_question:
                 client = genai.Client(api_key=GEMINI_API_KEY)
 
                 # Pre-calculate accurate pandas summary statistics
-                df["date_dt"] = pd.to_datetime(df["date"])
+                # NEW (handles Unix timestamps, ISO dates, and standard date strings):
+if pd.api.types.is_numeric_dtype(df["date"]):
+    df["date_dt"] = pd.to_datetime(df["date"], unit="s", errors="coerce")
+else:
+    df["date_dt"] = pd.to_datetime(df["date"], format="mixed", errors="coerce")
+
+# Drop any rows where the date couldn't be parsed
+df = df.dropna(subset=["date_dt"])
+df["month"] = df["date_dt"].dt.strftime("%B")
                 df["month"] = df["date_dt"].dt.strftime("%B")
 
                 monthly_summary = df.groupby("month").agg(
