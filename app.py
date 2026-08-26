@@ -3,8 +3,12 @@ from google import genai
 import pandas as pd
 import streamlit as st
 
-# Insert your actual Google Gemini API key here
-GEMINI_API_KEY = "insert key here"
+# Read key securely from Streamlit Cloud Secrets
+if "GEMINI_API_KEY" in st.secrets:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+else:
+    st.error("GEMINI_API_KEY is missing from Streamlit Secrets.")
+    st.stop()
 
 st.set_page_config(page_title="Church Farm Weather", layout="wide")
 st.title("Church Farm School Weather Dashboard")
@@ -70,7 +74,7 @@ if st.button("Ask Assistant") and user_question:
                 )
 
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash", contents=prompt
+                    model="gemini-2.5-flash", contents=prompt
                 )
 
                 st.markdown("**Answer:**")
@@ -99,7 +103,7 @@ if st.button("Generate Weather Predictions"):
             )
 
             response = client.models.generate_content(
-                model="gemini-3.6-flash", contents=prompt
+                model="gemini-2.5-flash", contents=prompt
             )
 
             st.markdown(response.text)
