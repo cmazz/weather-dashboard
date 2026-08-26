@@ -62,21 +62,16 @@ if st.button("Ask Assistant") and user_question:
     else:
         with st.spinner("Analyzing weather database..."):
             try:
-                client = genai.Client(api_key=GEMINI_API_KEY)
+                # Safely parse Unix timestamps or standard date strings
+                if pd.api.types.is_numeric_dtype(df["date"]):
+                    df["date_dt"] = pd.to_datetime(df["date"], unit="s", errors="coerce")
+                else:
+                    df["date_dt"] = pd.to_datetime(df["date"], format="mixed", errors="coerce")
 
-                # Pre-calculate accurate pandas summary statistics
-                # NEW (handles Unix timestamps, ISO dates, and standard date strings):
-if pd.api.types.is_numeric_dtype(df["date"]):
-    df["date_dt"] = pd.to_datetime(df["date"], unit="s", errors="coerce")
-else:
-    df["date_dt"] = pd.to_datetime(df["date"], format="mixed", errors="coerce")
+                df_clean = df.dropna(subset=["date_dt"]).copy()
+                df_clean["month"] = df_clean["date_dt"].dt.strftime("%B")
 
-# Drop any rows where the date couldn't be parsed
-df = df.dropna(subset=["date_dt"])
-df["month"] = df["date_dt"].dt.strftime("%B")
-                df["month"] = df["date_dt"].dt.strftime("%B")
-
-                monthly_summary = df.groupby("month").agg(
+                monthly_summary = df_clean.groupby("month").agg(
                     avg_temp=("temp_current", "mean"),
                     max_temp=("temp_current", "max"),
                     min_temp=("temp_current", "min"),
@@ -85,12 +80,13 @@ df["month"] = df["date_dt"].dt.strftime("%B")
                     day_count=("temp_current", "count"),
                 ).round(2).to_string()
 
-                recent_records = df.sort_values(by="date", ascending=False).head(60).to_string(index=False)
+                recent_records = df_clean.sort_values(by="date_dt", ascending=False).head(60).to_string(index=False)
 
+                client = genai.Client(api_key=GEMINI_API_KEY)
                 prompt = (
                     "You are an expert meteorological data analyst for Church Farm School.\n"
                     "Use the PRE-CALCULATED MONTHLY SUMMARY table below for all overall averages, totals, and monthly stats.\n"
-                    "Do NOT attempt to re-sum raw rows manually. Rely on the summary stats for mathematical accuracy.\n\n"
+                    "Do NOT attempt to re-sum raw rows manually.\n\n"
                     f"PRE-CALCULATED MONTHLY STATS:\n{monthly_summary}\n\n"
                     f"RECENT DAILY RECORDS (LAST 60 DAYS):\n{recent_records}\n\n"
                     f"User Question: {user_question}"
