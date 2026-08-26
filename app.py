@@ -53,7 +53,7 @@ st.divider()
 st.subheader("Ask Questions About Station History")
 user_question = st.text_input(
     "Ask a question about your weather history:",
-    placeholder="e.g., What was the average temperature in August? Or how much rain fell on August 20 in past years?",
+    placeholder="e.g., What was the average temperature in January?",
 )
 
 if st.button("Ask Assistant") and user_question:
@@ -63,27 +63,39 @@ if st.button("Ask Assistant") and user_question:
         with st.spinner("Analyzing weather database..."):
             try:
                 client = genai.Client(api_key=GEMINI_API_KEY)
-                full_data_str = df.to_string(index=False)
+
+                # Pre-calculate accurate pandas summary statistics
+                df["date_dt"] = pd.to_datetime(df["date"])
+                df["month"] = df["date_dt"].dt.strftime("%B")
+
+                monthly_summary = df.groupby("month").agg(
+                    avg_temp=("temp_current", "mean"),
+                    max_temp=("temp_current", "max"),
+                    min_temp=("temp_current", "min"),
+                    total_rain=("rain_total", "sum"),
+                    avg_humidity=("humidity", "mean"),
+                    day_count=("temp_current", "count"),
+                ).round(2).to_string()
+
+                recent_records = df.sort_values(by="date", ascending=False).head(60).to_string(index=False)
 
                 prompt = (
                     "You are an expert meteorological data analyst for Church Farm School.\n"
-                    "Answer the user's question accurately using ONLY the provided daily weather dataset.\n"
-                    "Perform any necessary calculations (averages, historical comparisons, totals, min/max) based on the data rows.\n\n"
-                    f"Dataset:\n{full_data_str}\n\n"
+                    "Use the PRE-CALCULATED MONTHLY SUMMARY table below for all overall averages, totals, and monthly stats.\n"
+                    "Do NOT attempt to re-sum raw rows manually. Rely on the summary stats for mathematical accuracy.\n\n"
+                    f"PRE-CALCULATED MONTHLY STATS:\n{monthly_summary}\n\n"
+                    f"RECENT DAILY RECORDS (LAST 60 DAYS):\n{recent_records}\n\n"
                     f"User Question: {user_question}"
                 )
 
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash", contents=prompt
+                    model="gemini-2.5-flash", contents=prompt
                 )
 
                 st.markdown("**Answer:**")
                 st.write(response.text)
             except Exception as e:
                 st.error(f"Error answering question: {e}")
-
-st.divider()
-
 # 5. AI Forecast Analysis
 st.subheader("AI Microclimate Predictions")
 if st.button("Generate Weather Predictions"):
