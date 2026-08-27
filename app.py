@@ -59,26 +59,36 @@ with tab_charts:
         with days_select:
             time_window = st.selectbox("Time Window", [30, 90, 365, "All History"], index=0)
         
-        # Filter window to avoid browser lag
+        # Filter by actual CALENDAR DAYS rather than row count
         if time_window != "All History":
-            df_filtered = df_clean.tail(int(time_window))
+            days_count = int(time_window)
+            max_date = df_clean["date_dt"].max()
+            min_date = max_date - pd.Timedelta(days=days_count)
+            df_filtered = df_clean[df_clean["date_dt"] >= min_date].copy()
         else:
-            # Resample full history to daily averages to protect performance
-            df_filtered = df_clean.resample("D", on="date_dt").mean(numeric_only=True).reset_index()
+            df_filtered = df_clean.copy()
+
+        # Downsample to daily means for 90+ day ranges to keep line charts fast
+        if time_window in [90, 365, "All History"] and len(df_filtered) > 500:
+            df_filtered = (
+                df_filtered.set_index("date_dt")
+                .resample("D")
+                .mean(numeric_only=True)
+                .reset_index()
+            )
 
         with col_select:
             selected_metrics = st.multiselect(
                 "Select Metrics to Plot",
                 options=["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"],
-                default=["temp_current"]
+                default=["humidity"]
             )
 
         if selected_metrics:
             st.line_chart(df_filtered.set_index("date_dt")[selected_metrics])
         
-        with st.expander("View Raw Data Table"):
+        with st.expander("View Data Table"):
             st.dataframe(df_filtered.sort_values(by="date_dt", ascending=False), width="stretch")
-
 # TAB 3: AI Q&A Assistant
 with tab_ai:
     st.subheader("Ask Questions & Generate Predictions")
