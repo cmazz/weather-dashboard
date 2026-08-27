@@ -20,15 +20,19 @@ conn.close()
 
 # --- DATA CLEANING & TYPE CONVERSION BLOCK ---
 if not df.empty:
+    # Ensure all expected metric columns exist even if missing from SQLite schema
+    expected_cols = ["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = None
+
     # Safely convert date column to Datetime objects
     if "date" in df.columns:
         df["date_dt"] = pd.to_datetime(df["date"], errors="coerce")
     
     # Force weather metrics to numeric numbers (converts '---' or text to NaN)
-    numeric_cols = ["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in expected_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
             
     # Remove rows where dates could not be parsed
     df_clean = df.dropna(subset=["date_dt"]).sort_values("date_dt").copy()
@@ -53,14 +57,15 @@ st.subheader("Station Data Log")
 if not df_clean.empty:
     st.write("**Temperature, Humidity, & Wind Speed**")
     
-    # Plot line chart safely with clean numeric columns
     chart_cols = [c for c in ["temp_current", "humidity", "wind_speed"] if c in df_clean.columns]
     if chart_cols:
         st.line_chart(df_clean.set_index("date_dt")[chart_cols])
 
     st.write("**Daily Precipitation (Inches)**")
-    if "rain_total" in df_clean.columns:
+    if "rain_total" in df_clean.columns and df_clean["rain_total"].notna().any():
         st.bar_chart(df_clean.set_index("date_dt")["rain_total"])
+    else:
+        st.caption("No rain gauge data available in history.")
 
     st.dataframe(
         df_clean.sort_values(by="date_dt", ascending=False), width="stretch"
@@ -74,7 +79,7 @@ st.divider()
 st.subheader("Ask Questions About Station History")
 user_question = st.text_input(
     "Ask a question about your weather history:",
-    placeholder="e.g., What was the average temperature in January 2025?",
+    placeholder="e.g., What was the average temperature in January 2024?",
 )
 
 if st.button("Ask Assistant") and user_question:
