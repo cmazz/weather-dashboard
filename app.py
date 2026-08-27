@@ -56,11 +56,32 @@ with tab_charts:
     st.subheader("Historical Weather Explorer")
     if not df_clean.empty:
         col_select, days_select = st.columns([3, 1])
-        with days_select:
-            time_window = st.selectbox("Time Window", [30, 90, 365, "All History"], index=0)
         
-        # Filter by actual CALENDAR DAYS rather than row count
-        if time_window != "All History":
+        with days_select:
+            time_window = st.selectbox("Time Window", [30, 90, 365, "All History", "Custom"], index=0)
+        
+        # Handle Custom Range vs Preset Windows
+        if time_window == "Custom":
+            min_avail = df_clean["date_dt"].min().date()
+            max_avail = df_clean["date_dt"].max().date()
+            
+            # Render date picker range control
+            selected_dates = st.date_input(
+                "Select Date Range",
+                value=(min_avail, max_avail),
+                min_value=min_avail,
+                max_value=max_avail
+            )
+            
+            # Ensure both start and end dates are selected before filtering
+            if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
+                start_d, end_d = selected_dates
+                mask = (df_clean["date_dt"].dt.date >= start_d) & (df_clean["date_dt"].dt.date <= end_d)
+                df_filtered = df_clean[mask].copy()
+            else:
+                df_filtered = df_clean.copy()
+                
+        elif time_window != "All History":
             days_count = int(time_window)
             max_date = df_clean["date_dt"].max()
             min_date = max_date - pd.Timedelta(days=days_count)
@@ -68,8 +89,8 @@ with tab_charts:
         else:
             df_filtered = df_clean.copy()
 
-        # Downsample to daily means for 90+ day ranges to keep line charts fast
-        if time_window in [90, 365, "All History"] and len(df_filtered) > 500:
+        # Resample large data ranges to daily averages for fast browser rendering
+        if len(df_filtered) > 500:
             df_filtered = (
                 df_filtered.set_index("date_dt")
                 .resample("D")
