@@ -113,25 +113,49 @@ with tab_charts:
 # TAB 3: AI Q&A Assistant
 with tab_ai:
     st.subheader("Ask Questions & Generate Predictions")
-    user_question = st.text_input("Ask about weather history or request a forecast analysis:")
+    user_question = st.text_input("Ask about weather history or request a forecast analysis:", placeholder="e.g., What was the average temperature in January 2024?")
     
+    # Optional debug toggle to inspect data sent to Gemini
+    show_debug = st.checkbox("Show calculated summary table sent to AI")
+
     if st.button("Submit Query") and user_question:
         if df_clean.empty:
             st.warning("No data available.")
         else:
             with st.spinner("Analyzing weather database..."):
                 try:
-                    df_clean["month"] = df_clean["date_dt"].dt.strftime("%B %Y")
-                    monthly_summary = df_clean.groupby("month").agg(
+                    # 1. Ensure Year-Month sorting and formatting
+                    df_ai = df_clean.copy()
+                    df_ai["year_month"] = df_ai["date_dt"].dt.strftime("%Y-%m (%B %Y)")
+
+                    # 2. Pre-aggregate monthly metrics cleanly
+                    monthly_df = df_ai.groupby("year_month").agg(
                         avg_temp=("temp_current", "mean"),
                         max_temp=("temp_current", "max"),
                         min_temp=("temp_current", "min"),
-                        total_rain=("rain_total", "sum")
-                    ).round(2).to_string()
+                        total_rain=("rain_total", "sum"),
+                        avg_humidity=("humidity", "mean"),
+                        record_count=("temp_current", "count")
+                    ).round(1).reset_index()
 
+                    monthly_summary_str = monthly_df.to_markdown(index=False)
+
+                    if show_debug:
+                        st.write("**Data table passed to Gemini:**")
+                        st.dataframe(monthly_df)
+
+                    # 3. Direct Gemini Prompting
                     client = genai.Client(api_key=GEMINI_API_KEY)
-                    prompt = f"Monthly Stats:\n{monthly_summary}\n\nQuestion: {user_question}"
+                    prompt = (
+                        "You are an expert weather data analyst for Church Farm School in Pennsylvania.\n"
+                        "Answer the user's question using ONLY the pre-calculated monthly table below.\n"
+                        "If asked about a specific month/year, locate that exact row in the table.\n\n"
+                        f"MONTHLY STATS TABLE:\n{monthly_summary_str}\n\n"
+                        f"User Question: {user_question}"
+                    )
+
                     response = client.models.generate_content(model="gemini-3.6-flash", contents=prompt)
+                    st.markdown("**Answer:**")
                     st.write(response.text)
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error answering question: {e}")
