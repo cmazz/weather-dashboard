@@ -12,11 +12,16 @@ else:
 st.set_page_config(page_title="Church Farm Weather", layout="wide")
 st.title("Church Farm School Weather Dashboard")
 
-# 1. Fetch data safely
+# 1. Fetch saved records from SQLite
 conn = sqlite3.connect("weather.db")
-df = pd.read_sql_query("SELECT * FROM daily_weather", conn)
+try:
+    df = pd.read_sql_query("SELECT * FROM daily_weather", conn)
+except Exception as e:
+    st.error(f"Error reading database: {e}")
+    df = pd.DataFrame()
 conn.close()
 
+# --- DATA CLEANING BLOCK ---
 if not df.empty:
     expected_cols = ["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"]
     for col in expected_cols:
@@ -26,9 +31,12 @@ if not df.empty:
 
     if "date" in df.columns:
         df["date_dt"] = pd.to_datetime(df["date"], errors="coerce")
-    
-    df_clean = df.dropna(subset=["date_dt"]).sort_values("date_dt").copy()
+        df_clean = df.dropna(subset=["date_dt"]).sort_values("date_dt").copy()
+    else:
+        st.warning("Found database table, but no 'date' column exists.")
+        df_clean = pd.DataFrame()
 else:
+    st.warning("Database table 'daily_weather' is empty. Please run import_csvs.py.")
     df_clean = pd.DataFrame()
 
 # 2. Tabbed Layout Architecture
