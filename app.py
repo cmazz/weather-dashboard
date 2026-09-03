@@ -138,7 +138,7 @@ with tab_ai:
                         record_count=("temp_current", "count")
                     ).round(1).reset_index()
 
-                    monthly_summary_str = monthly_df.to_markdown(index=False)
+                    monthly_summary_str = monthly_df.to_string(index=False)
 
                     if show_debug:
                         st.write("**Data table passed to Gemini:**")
