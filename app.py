@@ -12,32 +12,24 @@ else:
 st.set_page_config(page_title="Church Farm Weather", layout="wide")
 st.title("Church Farm School Weather Dashboard")
 
-# 1. Fetch saved records from SQLite
+# 1. Fetch saved records from SQLite (Auto-detect table name)
 conn = sqlite3.connect("weather.db")
 try:
-    df = pd.read_sql_query("SELECT * FROM daily_weather", conn)
+    # Find all table names in the uploaded database
+    tables_df = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
+    
+    if not tables_df.empty:
+        # Automatically select the first table found (e.g. daily_weather, weather, data)
+        table_name = tables_df["name"].iloc[0]
+        df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
+    else:
+        st.warning("The database file was found, but it contains no data tables.")
+        df = pd.DataFrame()
 except Exception as e:
     st.error(f"Error reading database: {e}")
     df = pd.DataFrame()
-conn.close()
-
-# --- DATA CLEANING BLOCK ---
-if not df.empty:
-    expected_cols = ["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"]
-    for col in expected_cols:
-        if col not in df.columns:
-            df[col] = None
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    if "date" in df.columns:
-        df["date_dt"] = pd.to_datetime(df["date"], errors="coerce")
-        df_clean = df.dropna(subset=["date_dt"]).sort_values("date_dt").copy()
-    else:
-        st.warning("Found database table, but no 'date' column exists.")
-        df_clean = pd.DataFrame()
-else:
-    st.warning("Database table 'daily_weather' is empty. Please run import_csvs.py.")
-    df_clean = pd.DataFrame()
+finally:
+    conn.close()
 
 # 2. Tabbed Layout Architecture
 tab_live, tab_charts, tab_ai = st.tabs(["⚡ Live Summary", "📊 Interactive Trends", "🤖 AI Assistant"])
