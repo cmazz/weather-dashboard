@@ -113,10 +113,12 @@ with tab_charts:
 # TAB 3: AI Q&A Assistant
 with tab_ai:
     st.subheader("Ask Questions & Generate Predictions")
-    user_question = st.text_input("Ask about weather history or request a forecast analysis:", placeholder="e.g., What was the average temperature in January 2024?")
+    user_question = st.text_input(
+        "Ask about weather history or request a forecast analysis:",
+        placeholder="e.g., What was the average temperature in January 2024?"
+    )
     
-    # Optional debug toggle to inspect data sent to Gemini
-    show_debug = st.checkbox("Show calculated summary table sent to AI")
+    show_debug = st.checkbox("Show calculated summary table sent to AI", value=True)
 
     if st.button("Submit Query") and user_question:
         if df_clean.empty:
@@ -124,19 +126,26 @@ with tab_ai:
         else:
             with st.spinner("Analyzing weather database..."):
                 try:
-                    # 1. Ensure Year-Month sorting and formatting
                     df_ai = df_clean.copy()
                     df_ai["year_month"] = df_ai["date_dt"].dt.strftime("%Y-%m (%B %Y)")
 
-                    # 2. Pre-aggregate monthly metrics cleanly
+                    # Aggregate monthly metrics safely
                     monthly_df = df_ai.groupby("year_month").agg(
                         avg_temp=("temp_current", "mean"),
                         max_temp=("temp_current", "max"),
                         min_temp=("temp_current", "min"),
                         total_rain=("rain_total", "sum"),
-                        avg_humidity=("humidity", "mean"),
-                        record_count=("temp_current", "count")
+                        avg_humidity=("humidity", "mean")
                     ).round(1).reset_index()
+
+                    # Extract requested year (e.g., "2024") to send ONLY relevant months to Gemini
+                    import re
+                    years_in_q = re.findall(r"\b(20\d\d)\b", user_question)
+                    if years_in_q:
+                        target_year = years_in_q[0]
+                        filtered_df = monthly_df[monthly_df["year_month"].str.contains(target_year)]
+                        if not filtered_df.empty:
+                            monthly_df = filtered_df
 
                     monthly_summary_str = monthly_df.to_string(index=False)
 
@@ -144,12 +153,11 @@ with tab_ai:
                         st.write("**Data table passed to Gemini:**")
                         st.dataframe(monthly_df)
 
-                    # 3. Direct Gemini Prompting
                     client = genai.Client(api_key=GEMINI_API_KEY)
                     prompt = (
                         "You are an expert weather data analyst for Church Farm School in Pennsylvania.\n"
                         "Answer the user's question using ONLY the pre-calculated monthly table below.\n"
-                        "If asked about a specific month/year, locate that exact row in the table.\n\n"
+                        "Locate the target month/year row and state the exact numbers directly.\n\n"
                         f"MONTHLY STATS TABLE:\n{monthly_summary_str}\n\n"
                         f"User Question: {user_question}"
                     )
