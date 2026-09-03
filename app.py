@@ -1,8 +1,12 @@
+import glob
+import os
+import re
 import sqlite3
 from google import genai
 import pandas as pd
 import streamlit as st
 
+# Secure API Key Check
 if "GEMINI_API_KEY" in st.secrets:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 else:
@@ -12,29 +16,49 @@ else:
 st.set_page_config(page_title="Church Farm Weather", layout="wide")
 st.title("Church Farm School Weather Dashboard")
 
-# 1. Fetch saved records from SQLite (Auto-detect table name)
-conn = sqlite3.connect("weather.db")
-try:
-    # Find all table names in the uploaded database
-    tables_df = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
+# 0. Always initialize df_clean upfront to prevent NameError
+df_clean = pd.DataFrame()
+
+# 1. Locate database file (handles case-sensitivity & targets largest populated file)
+db_files = glob.glob("*.db") + glob.glob("*.DB") + glob.glob("*.sqlite")
+db_files = [f for f in db_files if os.path.getsize(f) > 0]
+
+if not db_files:
+    st.warning("No populated database file found in repository. Please commit weather.db.")
+else:
+    target_db = max(db_files, key=os.path.getsize)
     
-    if not tables_df.empty:
-        # Automatically select the first table found (e.g. daily_weather, weather, data)
-        table_name = tables_df["name"].iloc[0]
-        df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
-    else:
-        st.warning("The database file was found, but it contains no data tables.")
-        df = pd.DataFrame()
-except Exception as e:
-    st.error(f"Error reading database: {e}")
-    df = pd.DataFrame()
-finally:
-    conn.close()
+    conn = sqlite3.connect(target_db)
+    try:
+        tables_df = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
+        if not tables_df.empty:
+            table_name = tables_df["name"].iloc[0]
+            df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
+
+            # Standardize numeric metric columns
+            expected_cols = ["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"]
+            for col in expected_cols:
+                if col not in df.columns:
+                    df[col] = None
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+            # Parse dates safely and generate df_clean
+            if "date" in df.columns:
+                df["date_dt"] = pd.to_datetime(df["date"], errors="coerce")
+                df_clean = df.dropna(subset=["date_dt"]).sort_values("date_dt").copy()
+            else:
+                st.warning("Database loaded, but no 'date' column was found.")
+        else:
+            st.warning(f"Database file '{target_db}' contains no data tables.")
+    except Exception as e:
+        st.error(f"Error reading database '{target_db}': {e}")
+    finally:
+        conn.close()
 
 # 2. Tabbed Layout Architecture
 tab_live, tab_charts, tab_ai = st.tabs(["⚡ Live Summary", "📊 Interactive Trends", "🤖 AI Assistant"])
 
-# TAB 1: Live View (Fast Load)
+# TAB 1: Live View
 with tab_live:
     if not df_clean.empty:
         latest = df_clean.iloc[-1]
@@ -47,9 +71,11 @@ with tab_live:
         
         st.subheader("Recent Activity (Last 30 Days)")
         df_recent = df_clean.tail(30)
-        st.line_chart(df_recent.set_index("date_dt")[["temp_current", "humidity"]])
+        chart_cols = [c for c in ["temp_current", "humidity"] if c in df_recent.columns]
+        if chart_cols:
+            st.line_chart(df_recent.set_index("date_dt")[chart_cols])
     else:
-        st.info("No records found.")
+        st.info("No weather records found.")
 
 # TAB 2: On-Demand Historical Charts
 with tab_charts:
@@ -60,27 +86,21 @@ with tab_charts:
         with days_select:
             time_window = st.selectbox("Time Window", [30, 90, 365, "All History", "Custom"], index=0)
         
-        # Handle Custom Range vs Preset Windows
         if time_window == "Custom":
             min_avail = df_clean["date_dt"].min().date()
             max_avail = df_clean["date_dt"].max().date()
-            
-            # Render date picker range control
             selected_dates = st.date_input(
                 "Select Date Range",
                 value=(min_avail, max_avail),
                 min_value=min_avail,
                 max_value=max_avail
             )
-            
-            # Ensure both start and end dates are selected before filtering
             if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
                 start_d, end_d = selected_dates
                 mask = (df_clean["date_dt"].dt.date >= start_d) & (df_clean["date_dt"].dt.date <= end_d)
                 df_filtered = df_clean[mask].copy()
             else:
                 df_filtered = df_clean.copy()
-                
         elif time_window != "All History":
             days_count = int(time_window)
             max_date = df_clean["date_dt"].max()
@@ -89,7 +109,7 @@ with tab_charts:
         else:
             df_filtered = df_clean.copy()
 
-        # Resample large data ranges to daily averages for fast browser rendering
+        # Downsample large ranges to daily means for browser performance
         if len(df_filtered) > 500:
             df_filtered = (
                 df_filtered.set_index("date_dt")
@@ -99,10 +119,11 @@ with tab_charts:
             )
 
         with col_select:
+            available_metrics = [c for c in ["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"] if c in df_filtered.columns]
             selected_metrics = st.multiselect(
                 "Select Metrics to Plot",
-                options=["temp_current", "humidity", "wind_speed", "bar_pressure", "rain_total"],
-                default=["humidity"]
+                options=available_metrics,
+                default=available_metrics[:1]
             )
 
         if selected_metrics:
@@ -110,6 +131,9 @@ with tab_charts:
         
         with st.expander("View Data Table"):
             st.dataframe(df_filtered.sort_values(by="date_dt", ascending=False), width="stretch")
+    else:
+        st.info("No weather records available for charting.")
+
 # TAB 3: AI Q&A Assistant
 with tab_ai:
     st.subheader("Ask Questions & Generate Predictions")
@@ -118,7 +142,7 @@ with tab_ai:
         placeholder="e.g., What was the average temperature in January 2024?"
     )
     
-    show_debug = st.checkbox("Show calculated summary table sent to AI", value=True)
+    show_debug = st.checkbox("Show calculated summary table sent to AI", value=False)
 
     if st.button("Submit Query") and user_question:
         if df_clean.empty:
@@ -129,7 +153,7 @@ with tab_ai:
                     df_ai = df_clean.copy()
                     df_ai["year_month"] = df_ai["date_dt"].dt.strftime("%Y-%m (%B %Y)")
 
-                    # Aggregate monthly metrics safely
+                    # Pre-calculate monthly stats
                     monthly_df = df_ai.groupby("year_month").agg(
                         avg_temp=("temp_current", "mean"),
                         max_temp=("temp_current", "max"),
@@ -138,8 +162,7 @@ with tab_ai:
                         avg_humidity=("humidity", "mean")
                     ).round(1).reset_index()
 
-                    # Extract requested year (e.g., "2024") to send ONLY relevant months to Gemini
-                    import re
+                    # Target specific year if mentioned in prompt
                     years_in_q = re.findall(r"\b(20\d\d)\b", user_question)
                     if years_in_q:
                         target_year = years_in_q[0]
